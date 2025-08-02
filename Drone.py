@@ -40,7 +40,7 @@ from Ambient import Ambient
 """
 
 class Drone2D:
-    def __init__(self, state_true, controllers, estimator, m=1.0, I_yy=0.1, k=0.1, l=0.2, c_d=0.3, frequency = 10, sync_mode = 'sync'):
+    def __init__(self, state_true, controllers, estimator, flight_instructions, m=1.0, I_yy=0.1, k=0.1, l=0.2, c_d=0.3, frequency = 10, sync_mode = 'sync'):
         self.state_true = state_true
         self.state_hat = state_true.copy() # Initial estimate is true. Might change later.
         self.m = m
@@ -64,6 +64,8 @@ class Drone2D:
         self.hover_signals = np.array([self.hover_speed, self.hover_speed])  # Hover speed for both motors
         self.u = self.hover_signals 
 
+
+        self.flight_instructions = flight_instructions
         #Histories
 
         # Controllers errors history
@@ -74,9 +76,10 @@ class Drone2D:
         }
 
         # Controller outputs history
-        self.output_history = {
+        self.input_history = {
             'desired_bank': [0],
-            'delta_u_x_pos': [0]
+            'delta_u_x_pos': [0],
+            'delta_u_z_pos': [0]
         }
 
         self.computer_time_history = [] # Times only for parameters that depend of computer processing
@@ -109,20 +112,40 @@ class Drone2D:
             # Get current state estimate
             self.state_hat = self.estimateState()
             pos_x = self.state_hat[0]
+            pos_z = self.state_hat[1]
             theta = self.state_hat[4]
             
-            # Position controller (outputs desired angle)
-            desired_bank, error_x_pos = self.controllers['pos_con'].PID(pos_x, sim_dt, 0)
+            # X Position controller (outputs desired angle)
+            if(self.flight_instructions['x_instruction']):
+                desired_bank, error_x_pos = self.controllers['x_pos_con'].PID(pos_x, sim_dt, self.flight_instructions['x_instruction'](t))
+            else: 
+                desired_bank = 0
+                error_x_pos = None
+            # Account for the fact that baking angle is measured counter-clockwise
+            desired_bank = desired_bank * -1
+            #desired_bank = np.clip(desired_bank, -1, 1) #Clip de desired angle
+
+            # Attitude controller, innerloop (outputs motor differential)
+            if(self.flight_instructions['bank_instruction']):
+                desired_bank = self.flight_instructions['bank_instruction'](t)
             
-            # Attitude controller (outputs motor differential)
-            delta_u_x_pos, error_bank = self.controllers['bank_con'].PID(theta, sim_dt, -desired_bank)
+            delta_u_x_pos, error_bank = self.controllers['bank_con'].PID(theta, sim_dt, desired_bank)
             delta_u_series1 = np.array([delta_u_x_pos, -delta_u_x_pos])
-            
+
+            # Z position controller
+            if(self.flight_instructions['z_instruction']):
+                delta_u_z_pos, error_z_pos = self.controllers['z_pos_con'].PID(pos_z, sim_dt, self.flight_instructions['z_instruction'](t))  # z-position control
+                delta_u_series2 = np.array([delta_u_z_pos, delta_u_z_pos])
+            else:
+                delta_u_z_pos = 0
+                delta_u_series2 = np.zeros(2)
+                error_z_pos = None
+
             #Accumulate al delta_u given by in parallel controllers
-            self.delta_u = delta_u_series1 #+
+            self.delta_u = delta_u_series1 + delta_u_series2
             
             # Apply hard limits to control inputs
-            self.delta_u = np.clip(self.delta_u, -10000, 10000)
+            self.delta_u = np.clip(self.delta_u, -100, 100)
 
             # Update motor commands (hover + differential)
             self.u = self.hover_signals + self.delta_u
@@ -133,8 +156,10 @@ class Drone2D:
             self.computer_time_history.append(t)
             self.error_history['bank_errors'].append(error_bank)
             self.error_history['x_pos_errors'].append(error_x_pos)
-            self.output_history['desired_bank'].append(desired_bank)
-            self.output_history['delta_u_x_pos'].append(delta_u_x_pos)
+            self.error_history['z_pos_errors'].append(error_z_pos)
+            self.input_history['desired_bank'].append(desired_bank)
+            self.input_history['delta_u_x_pos'].append(delta_u_x_pos)
+            self.input_history['delta_u_z_pos'].append(delta_u_z_pos)
         
         
         # Return current motor commands (either newly computed or previous)

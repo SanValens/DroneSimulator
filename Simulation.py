@@ -26,7 +26,7 @@ class Simulation:
         # Unpack the state vector
         x, z, vx, vz, theta, omega = state
         
-        # Translational dynamics
+            # Translational dynamics
         # TODO: motor forces are computed as function of ESC signal, instead of using angular velocity. 
         motor_forces = self.drone.k * u**2
         thrust_body = np.array([0, np.sum(motor_forces)])
@@ -40,13 +40,13 @@ class Simulation:
         #print(f"Ambient force: {ambient_force}")
         
         # Merge forces
-        forces_intertial = thrust_inertial - gravity_force #+ ambient_force
+        forces_intertial = thrust_inertial - gravity_force + ambient_force
 
         
         ax = forces_intertial[0] / self.drone.m
         az = forces_intertial[1] / self.drone.m
         
-        # Angular dynamics
+            # Angular dynamics
         # TODO: Add the effect of the ambient wind on the angular dynamics
         torque = self.drone.l * (motor_forces[0] - motor_forces[1])
         alpha = torque / self.drone.I_yy
