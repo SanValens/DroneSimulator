@@ -1,4 +1,5 @@
 from Drone import Drone2D
+from Drone import motor_thurst
 from Controller import Controller
 import numpy as np
 from Ambient import Ambient
@@ -28,7 +29,7 @@ class Simulation:
         
             # Translational dynamics
         # TODO: motor forces are computed as function of ESC signal, instead of using angular velocity. 
-        motor_forces = self.drone.k * u**2
+        motor_forces = motor_thurst(u)
         thrust_body = np.array([0, np.sum(motor_forces)])
         thrust_inertial = self.rotation_matrix2D(theta) @ thrust_body
         gravity_force = np.array([0, self.drone.m * self.g])

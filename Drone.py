@@ -2,7 +2,6 @@ import numpy as np
 from Controller import Controller
 from Ambient import Ambient
 
-
 """
     * Drone class to represent a single dron. Includes its flight computers and control logic
     SOON: Include state estimation/ sensor reading.
@@ -39,13 +38,39 @@ from Ambient import Ambient
            inputs: state 
 """
 
+def motor_thurst(signal):
+    grams_force = 0.023*signal**2 + 1.945 * signal - 6.457
+    newtons = 0.00981 * grams_force
+    return newtons
+
+def find_hover_signal(weight, tol=1e-6, max_iter=1000):
+    # We want to find signal such that 2*thurst(signal) = weight
+    # We'll use binary search between signal_min and signal_max
+    
+    signal_min = 0
+    signal_max = 100  # You can adjust this max if needed
+    
+    for _ in range(max_iter):
+        mid = (signal_min + signal_max) / 2
+        thrust_total = 2 * motor_thurst(mid) # 2 for two motors
+        
+        if abs(thrust_total - weight) < tol:
+            return mid
+        elif thrust_total < weight:
+            signal_min = mid
+        else:
+            signal_max = mid
+    
+    # If not converged, return the best guess
+    return (signal_min + signal_max) / 2
+
+
 class Drone2D:
-    def __init__(self, state_true, controllers, estimator, flight_instructions, m=1.0, I_yy=0.1, k=0.1, l=0.2, c_d=0.3, frequency = 10, sync_mode = 'sync'):
+    def __init__(self, state_true, controllers, estimator, flight_instructions, m=1.0, I_yy=0.1, l=0.2, c_d=0.3, frequency = 10, sync_mode = 'sync'):
         self.state_true = state_true
         self.state_hat = state_true.copy() # Initial estimate is true. Might change later.
         self.m = m
         self.I_yy = I_yy
-        self.k = k
         self.l = l
         self.c_d = c_d
         self.controllers = controllers
@@ -60,9 +85,10 @@ class Drone2D:
         self.frequency = frequency  # Control loop frequency in Hz
         self.computer_delay = 1.0 / frequency  # Time step for the control loop
         
-        self.hover_speed = np.sqrt((m * 9.81 / 2) / k)
-        self.hover_signals = np.array([self.hover_speed, self.hover_speed])  # Hover speed for both motors
-        self.u = self.hover_signals 
+        hov_sig = find_hover_signal(self.m * 9.81)
+        print(f'The drone hovers when signal is: {hov_sig}')
+        self.hover_input= np.array([hov_sig, hov_sig])  # Hover speed for both motors
+        self.u = self.hover_input 
 
 
         self.flight_instructions = flight_instructions
@@ -148,7 +174,7 @@ class Drone2D:
             self.delta_u = np.clip(self.delta_u, -100, 100)
 
             # Update motor commands (hover + differential)
-            self.u = self.hover_signals + self.delta_u
+            self.u = self.hover_input + self.delta_u
             
             self.last_t = t  # Update last control time
 

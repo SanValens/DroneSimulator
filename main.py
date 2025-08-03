@@ -12,11 +12,9 @@ if __name__ == "__main__":
     # Define drone parameters
     m = 0.5 #kg
     I_yy = 4.856 * 1e-3 #Inercia del dron completo
-    k = 2.980 * 1e-6 #Constante de lift
     l = 0.089 #m arm of the motors to the center of gravity
     c_d = 0.3 #Coeficiente de drag traslacional
-    #state = np.array([4, 0, 0, 0, -np.pi/5, 0])
-    state = np.array([-4, 3, 0, 0, 0, 0]) 
+    state = np.array([4, 0, 0, 0, -np.pi/5, 0])
 
     # Define PID gains for each controller
     #OLD PIDS THAT WORKED WITH NORMAL DERIVATIVE
@@ -40,7 +38,7 @@ if __name__ == "__main__":
     ukf = UKF()  # Initialize the UKF instance
 
     # Create a drone instance
-    drone = Drone2D(state, controllers_dict, ukf, flight_instructions, m, I_yy, k, l, c_d, sync_mode = 'sync', frequency=20)
+    drone = Drone2D(state, controllers_dict, ukf, flight_instructions, m, I_yy, l, c_d, sync_mode = 'sync', frequency=20)
     
     # Create an ambient instance (if needed)
     ambient = Ambient(dim = 2, speed = 0.0)
