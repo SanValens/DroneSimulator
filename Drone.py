@@ -75,7 +75,6 @@ class Drone2D:
         self.c_d = c_d
         self.controllers = controllers
         self.estimator = estimator
-    
 
         #Time handling
         if(not (sync_mode == 'async' or  sync_mode == 'sync')):
