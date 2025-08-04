@@ -54,7 +54,6 @@ class Simulation:
 
         return np.array([vx, vz, ax, az, omega, alpha])
 
-
     def run(self, t_max = 10):
         t_eval = np.arange(0, t_max, self.dt)
 
@@ -80,9 +79,11 @@ class Simulation:
     def rotation_matrix3D(self, theta):
         pass
 
+
 def step_RK4(f, x, u, dt):
     k1 = f(x, u)
     k2 = f(x + dt / 2 * k1, u)
     k3 = f(x + dt / 2 * k2, u)
     k4 = f(x + dt * k3, u)
     return x + (dt / 6) * (k1 + 2*k2 + 2*k3 + k4)
+

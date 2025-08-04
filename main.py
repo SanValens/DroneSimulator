@@ -15,12 +15,13 @@ if __name__ == "__main__":
     l = 0.089 #m arm of the motors to the center of gravity
     c_d = 0.3 #Coeficiente de drag traslacional
     state = np.array([4, 0, 0, 0, -np.pi/5, 0])
+    #state = np.array([0, 0, 0, 0, 0, 0])
 
     # Define PID gains for each controller
     #OLD PIDS THAT WORKED WITH NORMAL DERIVATIVE
-    pid_gains_banking =  [0.5, 0., 4.5]
-    pid_gains_x_position = [0.5, 0.4, 1.5]
-    pid_gains_z_position = [14.5, 0., 10.4]
+    pid_gains_banking =  [20, 0., 5.26764852]
+    pid_gains_x_position = [0.5, 0.4, 0.5]
+    pid_gains_z_position = [13.5,10.3,5.4]
 
     # Create instances of controllers and group them in a dictionary
     controllers_dict = {
@@ -44,7 +45,7 @@ if __name__ == "__main__":
     ambient = Ambient(dim = 2, speed = 0.0)
     
     #Define simulation parameters
-    dt = 0.001  # Time step for the simulation
+    dt = 0.005  # Time step for the simulation
     t_max = 40  # Maximum simulation time in seconds
     
     # Create a simulation instance
@@ -58,13 +59,20 @@ if __name__ == "__main__":
     drone_state_true = drone.state_true_history
     drone_state_hat = drone.state_hat_history
 
-    bank_errors = drone.error_history['bank_errors']
-    x_pos_errors = drone.error_history['x_pos_errors']
-    z_pos_errors = drone.error_history['z_pos_errors']
+    bank_errors = controllers_dict['bank_con'].error_history
+    x_pos_errors = controllers_dict['x_pos_con'].error_history
+    z_pos_errors = controllers_dict['z_pos_con'].error_history
+    
+    bank_measurements = controllers_dict['bank_con'].measurement_history
+    x_pos_measurements = controllers_dict['x_pos_con'].measurement_history
+    z_pos_measurements = controllers_dict['z_pos_con'].measurement_history
 
     bank_desired =  drone.input_history['desired_bank']
     delta_u_x_pos = drone.input_history['delta_u_x_pos']
     delta_u_z_pos = drone.input_history['delta_u_z_pos']
+
+    motor1_history = drone.motor_signal_history['motor1']
+    motor2_history = drone.motor_signal_history['motor2']
 
     x_positions_true = [state[0] for state in drone_state_true]
     bank_true = [state[4] for state in drone_state_true]
@@ -113,15 +121,20 @@ if __name__ == "__main__":
     plt.plot(drone_computer_time, delta_u_x_pos, label='Control input for X controller', color='orange')
     plt.plot(drone_computer_time, delta_u_z_pos, label='Control input for Z controller', color='green')
 
-    plt.title('X Position Error Over Time')
+    plt.title('Delta signal for every series of controllers')
     plt.xlabel('Time (s)')
-    plt.ylabel('Error (m or rad)')
+    plt.ylabel('%')
     plt.axhline(y=0, color='k', linestyle='--')
     plt.legend()
-
 
     plt.tight_layout()
     plt.show()
 
+    plt.plot(drone_computer_time, motor1_history, label='Signal for Motor 1 (right)', color = 'red')
+    plt.plot(drone_computer_time, motor2_history, label='Signal for Motor 2 (left)', color = 'blue')
+    plt.axhline(y=100, color = 'k', linestyle='--')
+    plt.axhline(y=drone.hover_input[0], color = 'gray', linestyle='--', label = 'Hover signal')
+    plt.legend()
+    plt.show()
 
 
