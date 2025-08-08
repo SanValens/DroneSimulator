@@ -38,7 +38,7 @@ from Ambient import Ambient
            inputs: state 
 """
 
-def motor_thurst(signal):
+def motor_thrust(signal):
     grams_force = 0.023*signal**2 + 1.945 * signal - 6.457
     newtons = 0.00981 * grams_force
     return newtons
@@ -52,7 +52,7 @@ def find_hover_signal(weight, tol=1e-6, max_iter=1000):
     
     for _ in range(max_iter):
         mid = (signal_min + signal_max) / 2
-        thrust_total = 2 * motor_thurst(mid) # 2 for two motors
+        thrust_total = 2 * motor_thrust(mid) # 2 for two motors
         
         if abs(thrust_total - weight) < tol:
             return mid
@@ -133,7 +133,7 @@ class Drone2D:
             theta = self.state_hat[4]
             
             # X Position controller (outputs desired angle)
-            if(self.flight_instructions['x_instruction']):
+            if(self.flight_instructions['x_instructions']):
                 desired_bank = self.controllers['x_pos_con'].PID(pos_x, sim_dt, self.flight_instructions['x_instruction'](t))
             else: 
                 desired_bank = 0

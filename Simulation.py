@@ -1,5 +1,6 @@
 from Drone import Drone2D
-from Drone import motor_thurst
+from Drone import motor_thrust
+from Drone3D import motor_thrust3D
 from Controller import Controller
 import numpy as np
 from Ambient import Ambient
@@ -30,7 +31,7 @@ class Simulation:
         
             # Translational dynamics
         # TODO: motor forces are computed as function of ESC signal, instead of using angular velocity. 
-        motor_forces = motor_thurst(u)
+        motor_forces = motor_thrust(u)
         thrust_body = np.array([0, np.sum(motor_forces)])
         thrust_inertial = self.rotation_matrix2D(theta) @ thrust_body
         gravity_force = np.array([0, self.drone.m * self.g])
@@ -130,18 +131,21 @@ class Simulation:
         eta_dot = np.array([phi_dot, theta_dot, psi_dot])
 
         # Body frame rotation rates
-        omega = self.euler_rate_transformation_matrix(eta, inverse = False) @ eta_dot
-        # Unpack angular rates
-        p, q, r = omega
+        omega = self.T(eta, inverse = False) @ eta_dot
 
         # 2. Estimate the angular velocity of each motor
         #   Taking into account the PWM - OMEGA relationship. 
-        OMEGA_motor = self.drone.k_t * u
+        """OMEGA_motor = self.drone.k_t * u
         #   Calculate the relative angular velocity of the motors to estimate the gyroscopic torques
-        OMEGA_r =  -OMEGA_motor[0] + OMEGA_motor[1] - OMEGA_motor[2] + OMEGA_motor[3]
 
         # 3. Calculate thrurst for each motor 
-        thrust_motors = self.drone.k_f * (OMEGA_motor)**2
+        thrust_motors = self.drone.k_f * (OMEGA_motor)**2 """
+        # 2.5 Estimate using the mapped PWM to THRUST function
+        thrust_motors = motor_thrust3D(u)
+        OMEGA_motor = np.sqrt(thrust_motors/self.drone.k_f)
+        #OMEGA_r =  -OMEGA_motor[0] + OMEGA_motor[1] - OMEGA_motor[2] + OMEGA_motor[3]
+        OMEGA_r = 0
+
         #   Unpack thurst
         T_1, T_2, T_3, T_4 = thrust_motors
 
@@ -154,17 +158,18 @@ class Simulation:
         M_1, M_2, M_3, M_4 = moment_motors
         
         # Drone's body moments
-        M_b = np.array([
-            (T_1+T_4-T_2-T_3)*self.drone.l/np.sqrt(2),
-            (T_1+T_2-T_3-T_4)*self.drone.l/np.sqrt(2),
+        sqrt_2 = np.sqrt(2)
+        M_b = np.array([ #M_b is on the drone bodyframe
+            (T_1+T_4-T_2-T_3)*self.drone.l/sqrt_2,
+            (T_1+T_2-T_3-T_4)*self.drone.l/sqrt_2,
             M_4 + M_2 - M_1 - M_3
         ])
 
         # Drone's drag moments
-        M_a = self.drone.k_dm * eta_dot
+        M_a = self.drone.k_dm * np.linalg.norm(omega) * omega
+        #print(f"Thrusts: {thrust_motors}")
 
         # ROTATIONAL DYNAMICS:
-
         
         I_omega = self.drone.I @ omega
         M_gyro = np.cross(omega, np.array([0, 0,self.drone.J_r * OMEGA_r]))
@@ -172,17 +177,20 @@ class Simulation:
         omega_dot = np.linalg.inv(self.drone.I) @ (M_b - M_a - M_gyro - omega_cross_Iomega)
 
 
+        #M_b[np.abs(M_b) < 1e-10] = 0
 
-        """p_dot = b_1*(M_b[0] - M_a[0]) + (a_1 * r * q) - (q*a_2*OMEGA_r)
-        q_dot = b_2*(M_b[1] - M_a[1]) + (a_3*p*r) + (p*a_4*OMEGA_r)
-        r_dot = b_3*(M_b[2] - M_a[2]) + (a_5 * p * q)
+        T_eta = self.T(eta, inverse=False)
+        T_dot_eta = self.T_dot(eta, eta_dot)  # This should just return Ṫ(η)
+        eta_dotdot = np.linalg.inv(T_eta) @ (omega_dot - T_dot_eta @ eta_dot)
 
-        # Repack the omega
-        omega_dot = [p_dot, q_dot, r_dot] """
-
-        # Transform into inertial frame
-        eta_dotdot = self.euler_rate_transformation_matrix(eta, inverse = True) @ omega_dot
-
+        """ print("T(eta):\n", T_eta)
+        print("T(eta)_inv:\n", np.linalg.inv(T_eta))
+        print("T(eta) dot:\n", T_dot_eta)
+        print(f"Omega_dot: {omega}")
+        print(f"Eta_dot: {eta_dot}")
+        print(f"Eta_dot_dot: {eta_dotdot}")
+        print(f"Euler angles: {eta}")
+        """
         phi_dotdot, theta_dotdot, psi_dotdot = eta_dotdot
 
         # 5. Prepare for traslational dynamics
@@ -192,20 +200,63 @@ class Simulation:
         gravity_force = np.array([0, 0, self.drone.m*self.g])
         
         # TRASLATIONAL DYNAMICS:
+
         T_motors = np.sum(thrust_motors)  # scalar total thrust
         thrust_vector_body = np.array([0, 0, T_motors])  # thrust in body frame (z-direction)
-        a = (self.rotation_matrix(eta) @ thrust_vector_body - F_a - gravity_force)/self.drone.m
-
+        a = (self.rotation_matrix3D(eta) @ thrust_vector_body - F_a - gravity_force)/self.drone.m
+        #Account for error in the hover signal:
         x_dotdot, y_dotdot, z_dotdot = a
+
+        """ print("Thrust = ", thrust_vector_body)
+        print("Thrust individual = ", thrust_motors)
+        print("Angles are = ", eta)
+        print("And accelerations are: ", a) """
 
         # Final repackaging of the values
 
         state_dot = np.array([x_dot, y_dot, z_dot, x_dotdot, y_dotdot, z_dotdot, phi_dot, theta_dot, psi_dot, phi_dotdot, theta_dotdot, psi_dotdot])
         
         return state_dot
+    
         
+    def run(self, t_max = 10):
+        t_eval = np.arange(0, t_max, self.dt)
+        for t in t_eval[1:]:
+            # Ask the drone for control inputs
+            u = self.drone.control(t)
 
-    def euler_rate_transformation_matrix(self, eta, inverse = False):
+            # Propagate the system using the current true state and control inputs
+            new_state = step_RK4(self.dynamics2D, self.drone.state_true, u, self.dt)
+            
+            # Update the drone's true state
+            self.drone.set_state_true(new_state)
+
+        return t_eval
+    
+
+    def run3D(self, t_max = 10):
+        t_eval = np.arange(0, t_max, self.dt)
+        # Simulation loop
+        for t in t_eval[1:]:
+            # Ask the drone for control inputs
+            u = self.drone.control(t)
+
+            # Propagate the system using the current true state and control inputs
+            new_state = step_RK4(self.dynamics3D, self.drone.state_true, u, self.dt)
+            
+            # Update the drone's true state
+            self.drone.set_state_true(new_state)
+        return t_eval
+        
+    
+
+    def rotation_matrix2D(self, theta):
+        return np.array([
+            [np.cos(theta), -np.sin(theta)],
+            [np.sin(theta),  np.cos(theta)]
+        ])
+
+    def T(self, eta, inverse = False):
         """
         Returns the transformation matrix that maps Euler angle rates
         [phi_dot, theta_dot, psi_dot] to body angular rates [p, q, r].
@@ -232,9 +283,26 @@ class Simulation:
             return np.linalg.inv(T)
         else: 
             return T
+        
+    def T_dot(self, eta, eta_dot):
+        phi, theta, _ = eta
+        phi_dot, theta_dot, _ = eta_dot
+        
+        c = np.cos
+        s = np.sin
+
+        T_dot = np.array([
+            [0, 0, -theta_dot*c(theta_dot)],
+            [0, -phi_dot*s(phi), phi_dot*c(phi)*c(theta) - theta_dot*s(theta)*s(phi)],
+            [0, -phi_dot*c(phi), -phi_dot*s(phi)*c(theta) - theta_dot*s(theta)*c(phi)]
+        ])
+        return T_dot
+        
 
 
-    def rotation_matrix(self, eta):
+
+
+    def rotation_matrix3D(self, eta):
         phi, theta, psi = eta
         c, s = np.cos, np.sin
 
@@ -245,56 +313,38 @@ class Simulation:
         ])
         return R
 
-    def run(self, t_max = 10):
-        t_eval = np.arange(0, t_max, self.dt)
-
-        for t in t_eval[1:]:
-            # Ask the drone for control inputs
-            u = self.drone.control(t)
-
-            # Propagate the system using the current true state and control inputs
-            new_state = step_RK4(self.dynamics2D, self.drone.state_true, u, self.dt)
-            
-            # Update the drone's true state
-            self.drone.set_state_true(new_state)
-
-        return t_eval
-    
-
-    def run3D(self, t_max = 10):
-        t_eval = np.arange(0, t_max, self.dt)
-        states = np.zeros((int(t_max/self.dt), 12))
-        i = 0
-        # Simulation loop
-        for t in t_eval:
-            # Control input: hover for 5s, then increase thrust slightly
-            if t < 5:
-                u = np.ones(4) * (self.drone.hov_sig) + np.array([10, 10, 0, 0])
-            else:
-                u = np.ones(4)* (self.drone.hov_sig) + np.array([0,0,0,0]) 
-
-            # Step dynamics
-            new_state = step_RK4(self.dynamics3D, self.drone.state_true, u, self.dt)
-            states[i, :] = self.drone.state_true = new_state
-            i=i+1
-        return t_eval, states
-        
-    
-
-    def rotation_matrix2D(self, theta):
-        return np.array([
-            [np.cos(theta), -np.sin(theta)],
-            [np.sin(theta),  np.cos(theta)]
-        ])
-
-    def rotation_matrix3D(self, theta):
-        pass
 
 
 def step_RK4(f, x, u, dt):
     k1 = f(x, u)
-    k2 = f(x + dt / 2 * k1, u)
-    k3 = f(x + dt / 2 * k2, u)
-    k4 = f(x + dt * k3, u)
+    k2 = f(x + (dt / 2) * k1, u)
+    k3 = f(x + (dt / 2) * k2, u)
+    k4 = f(x + (dt * k3), u)
     return x + (dt / 6) * (k1 + 2*k2 + 2*k3 + k4)
+
+
+def euler_acceleration(eta, eta_dot, omega_dot):
+    phi, theta, _ = eta
+    c, s = np.cos, np.sin
+    
+    # Transformation matrix T(η)
+    T = np.array([
+        [1, s(phi)*np.tan(theta), c(phi)*np.tan(theta)],
+        [0, c(phi), -s(phi)],
+        [0, s(phi)/c(theta), c(phi)/c(theta)]
+    ])
+    
+    # Derivative of T(η) (Coriolis term)
+    T_dot = np.array([
+        [0, c(phi)*np.tan(theta)*eta_dot[0] - s(phi)*np.sec(theta)**2*eta_dot[1], 
+             -s(phi)*np.tan(theta)*eta_dot[0] + c(phi)*np.sec(theta)**2*eta_dot[1]],
+        [0, -s(phi)*eta_dot[0], -c(phi)*eta_dot[0]],
+        [0, (c(phi)*eta_dot[0])/c(theta) + (s(phi)*s(theta)*eta_dot[1])/c(theta)**2,
+             (-s(phi)*eta_dot[0])/c(theta) + (c(phi)*s(theta)*eta_dot[1])/c(theta)**2]
+    ])
+    
+    # Image's compact form (requires matrix inversion)
+    eta_ddot = np.linalg.inv(T) @ (omega_dot - T_dot @ eta_dot)
+    
+    return eta_ddot
 
