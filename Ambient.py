@@ -8,7 +8,7 @@ class Ambient:
     def get_speed(self):
         """
         Returns the ambient wind speed as a numpy array.
-        For simplicity, we assume a constant speed in the x direction (andincluding y-direction if 3D)
+        For simplicity, we assume a constant speed in the x direction (and including y-direction if 3D)
         and no wind in the z direction, for now
         """
         if self.dim == 2:

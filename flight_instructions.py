@@ -1,5 +1,9 @@
 def x_instructions(t):
-    return 3
+    """ if(t > 6):
+        return 2.5
+    else:
+        return 3 """
+    return -1
 
 def y_instructions(t):
     return 2

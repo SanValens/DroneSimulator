@@ -9,7 +9,7 @@ class Simulation:
     def __init__(self, drone, ambient, dt=0.01):
         self.drone = drone
         self.ambient = ambient  
-        self.dt = dt
+        self.dt = self.current_dt = dt
         self.g = 9.81
 
         # Histories
@@ -114,6 +114,11 @@ class Simulation:
             [6] phi_dot, [7] theta_dot, [8] psi_dot,
             [9] phi_dotdot, [10] theta_dotdot, [11] psi_dotdot
 
+        output : Output of the system according to the state space theory
+            [0] x_dotdot 
+            [1] y_dotdot
+            [2] z_dotdot
+
         Notes
         -----
         - The function models both translational and rotational dynamics using Newton-Euler equations.
@@ -194,8 +199,12 @@ class Simulation:
         phi_dotdot, theta_dotdot, psi_dotdot = eta_dotdot
 
         # 5. Prepare for traslational dynamics
-        # Traslational drag force
-        F_a = self.drone.k_dt * np.linalg.norm(v) * v
+        
+        # Drag effect that considers the current wind speed
+        wind_speed = self.ambient.get_speed() # Returns an array with wind speed in x, y and z directions
+        wind_relative_speed =  v - wind_speed # drone speed relative to the wind
+        drag_force = -self.drone.k_dt * np.linalg.norm(wind_relative_speed) * wind_relative_speed # drag force is opposite to the drone relative speed
+        
         #Gravity effect
         gravity_force = np.array([0, 0, self.drone.m*self.g])
         
@@ -203,7 +212,7 @@ class Simulation:
 
         T_motors = np.sum(thrust_motors)  # scalar total thrust
         thrust_vector_body = np.array([0, 0, T_motors])  # thrust in body frame (z-direction)
-        a = (self.rotation_matrix3D(eta) @ thrust_vector_body - F_a - gravity_force)/self.drone.m
+        a = (self.rotation_matrix3D(eta) @ thrust_vector_body - gravity_force + drag_force)/self.drone.m
         #Account for error in the hover signal:
         x_dotdot, y_dotdot, z_dotdot = a
 
@@ -216,7 +225,9 @@ class Simulation:
 
         state_dot = np.array([x_dot, y_dot, z_dot, x_dotdot, y_dotdot, z_dotdot, phi_dot, theta_dot, psi_dot, phi_dotdot, theta_dotdot, psi_dotdot])
         
-        return state_dot
+        output = np.array(a)
+
+        return state_dot, output
     
         
     def run(self, t_max = 10):
@@ -235,17 +246,32 @@ class Simulation:
     
 
     def run3D(self, t_max = 10):
-        t_eval = np.arange(0, t_max, self.dt)
+        t_eval = [0]
+        t = 0
         # Simulation loop
-        for t in t_eval[1:]:
+
+        while(t < t_max):
             # Ask the drone for control inputs
             u = self.drone.control(t)
 
             # Propagate the system using the current true state and control inputs
-            new_state = step_RK4(self.dynamics3D, self.drone.state_true, u, self.dt)
+            new_state, output = step_RK4(self.dynamics3D, self.drone.state_true, u, self.current_dt)
             
+            # Update the output data, it is used by the drone to estimate its own position precisely
+            self.drone.set_output(output)
+
             # Update the drone's true state
             self.drone.set_state_true(new_state)
+
+            required_dt = self.drone.compute(t, self.dt)
+
+            if(required_dt):
+                t += required_dt
+                self.current_dt = required_dt
+            else: 
+                t += self.dt
+                self.current_dt = self.dt
+            t_eval.append(t)
         return t_eval
         
     
@@ -299,9 +325,6 @@ class Simulation:
         return T_dot
         
 
-
-
-
     def rotation_matrix3D(self, eta):
         phi, theta, psi = eta
         c, s = np.cos, np.sin
@@ -316,11 +339,15 @@ class Simulation:
 
 
 def step_RK4(f, x, u, dt):
-    k1 = f(x, u)
-    k2 = f(x + (dt / 2) * k1, u)
-    k3 = f(x + (dt / 2) * k2, u)
-    k4 = f(x + (dt * k3), u)
-    return x + (dt / 6) * (k1 + 2*k2 + 2*k3 + k4)
+    k1, _ = f(x, u)
+    k2, _ = f(x + (dt / 2) * k1, u)
+    k3, _ = f(x + (dt / 2) * k2, u)
+    k4, _ = f(x + (dt * k3), u)
+
+    x_new = x + (dt / 6) * (k1 + 2*k2 + 2*k3 + k4)
+
+    _, y_new = f(x_new, u) #Output of our state space system
+    return  x_new, y_new
 
 
 def euler_acceleration(eta, eta_dot, omega_dot):
@@ -347,4 +374,3 @@ def euler_acceleration(eta, eta_dot, omega_dot):
     eta_ddot = np.linalg.inv(T) @ (omega_dot - T_dot @ eta_dot)
     
     return eta_ddot
-
